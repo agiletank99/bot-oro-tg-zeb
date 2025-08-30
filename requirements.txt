@@ -2,5 +2,6 @@ setuptools
 python-telegram-bot[job-queue]>=20.0
 pandas
 numpy
+yfinance
 requests
 newsapi-python
