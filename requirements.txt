@@ -1,4 +1,3 @@
-# requirements.txt (Versione FMP)
 setuptools
 python-telegram-bot[job-queue]>=20.0
 pandas
