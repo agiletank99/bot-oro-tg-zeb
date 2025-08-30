@@ -1,4 +1,4 @@
-# analysis.py (Versione FMP - Stabile e Robusta)
+# analysis.py (Versione FMP - Pulita e Corretta)
 import os
 import requests
 import pandas as pd
@@ -23,7 +23,7 @@ def calculate_bollinger_bands(data, window=20, std_dev=2):
     middle_band = data['close'].rolling(window=window).mean(); std = data['close'].rolling(window=window).std()
     return middle_band + (std * std_dev), middle_band - (std * std_dev)
 
-# --- NUOVA FUNZIONE DATI CON FMP E VALIDAZIONE ---
+# --- FUNZIONE DATI CON FMP E VALIDAZIONE ---
 def get_market_data(symbol="XAUUSD"):
     if not FMP_API_KEY:
         return ("ERRORE", "Chiave API FMP non configurata.")
@@ -62,14 +62,12 @@ def get_market_data(symbol="XAUUSD"):
         data = {'D1': data_d, 'H4': data_h.resample('4h').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last', 'volume':'sum'}).dropna()}
         
         for df in data.values():
-            # Calcoliamo prima con i nomi minuscoli di FMP
+            df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+            # Rinominiamo le colonne PRIMA di calcolare gli indicatori
             df['EMA_50']=calculate_ema(df,50); df['EMA_200']=calculate_ema(df,200)
             df['RSI_14']=calculate_rsi(df,14);
             df['MACD_line'], df['MACD_signal']=calculate_macd(df)
             df['BBU'], df['BBL']=calculate_bollinger_bands(df)
-            # Ora rinominiamo le colonne per coerenza con il resto del codice
-            df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
-            # Calcoliamo l'ATR per ultimo perché richiede i nomi di colonna maiuscoli
             df['ATR_14']=calculate_atr(df,14)
 
         return ("SUCCESSO", data)
@@ -118,12 +116,4 @@ def analyze_market():
     status, data_or_error = get_market_data()
     if status == "ERRORE":
         return "ERRORE", data_or_error, "N/A", None, None, None
-    return analyze_from_data(data_or_error)```
-
-### **Azione Finale**
-
-1.  **Sostituisci** il codice in `analysis.py` su GitHub.
-2.  **Fai il commit.**
-3.  **Fai il redeploy** su Koyeb.
-
-Ora il bot sarà molto più specifico nel dirti perché FMP sta fallendo, se sta fallendo. Questo ci darà l'indizio finale.
+    return analyze_from_data(data_or_error)
