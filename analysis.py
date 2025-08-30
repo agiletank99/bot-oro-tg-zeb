@@ -1,13 +1,14 @@
-# analysis.py (Versione FMP - Stabile)
+# analysis.py (Versione FMP - Stabile e Robusta)
 import os
 import requests
 import pandas as pd
+from newsapi import NewsApiClient
 
 # --- CHIAVI API ---
 FMP_API_KEY = os.environ.get("FMP_API_KEY")
 NEWS_API_KEY = os.environ.get("NEWS_API_KEY")
 
-# --- Funzioni Indicatori (invariate) ---
+# --- Funzioni Indicatori (usano nomi di colonna minuscoli internamente) ---
 def calculate_ema(data, length): return data['close'].ewm(span=length, adjust=False).mean()
 def calculate_rsi(data, length=14):
     delta = data['close'].diff(); gain = (delta.where(delta > 0, 0)).rolling(window=length).mean(); loss = (-delta.where(delta < 0, 0)).rolling(window=length).mean()
@@ -22,42 +23,63 @@ def calculate_bollinger_bands(data, window=20, std_dev=2):
     middle_band = data['close'].rolling(window=window).mean(); std = data['close'].rolling(window=window).std()
     return middle_band + (std * std_dev), middle_band - (std * std_dev)
 
-# --- NUOVA FUNZIONE DATI CON FMP ---
+# --- NUOVA FUNZIONE DATI CON FMP E VALIDAZIONE ---
 def get_market_data(symbol="XAUUSD"):
-    if not FMP_API_KEY: return ("ERRORE", "Chiave API FMP non configurata.")
+    if not FMP_API_KEY:
+        return ("ERRORE", "Chiave API FMP non configurata.")
     try:
-        # Scarichiamo dati orari (ultimi ~40 giorni) e giornalieri
         url_h = f"https://financialmodelingprep.com/api/v3/historical-chart/1hour/{symbol}?apikey={FMP_API_KEY}"
         url_d = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}?apikey={FMP_API_KEY}"
 
-        data_h = pd.DataFrame(requests.get(url_h).json())
-        data_d = pd.DataFrame(requests.get(url_d).json()['historical'])
+        response_h = requests.get(url_h)
+        response_d = requests.get(url_d)
         
-        if data_h.empty or data_d.empty: return ("ERRORE", "FMP ha restituito dati vuoti.")
+        response_h.raise_for_status()
+        response_d.raise_for_status()
 
-        # Formattiamo i dati
+        json_h = response_h.json()
+        json_d = response_d.json()
+
+        if not isinstance(json_h, list) or not json_h:
+            error_message = json_h.get('Error Message', 'Risposta dati orari non valida da FMP.')
+            return ("ERRORE", error_message)
+        
+        if 'historical' not in json_d or not isinstance(json_d['historical'], list) or not json_d['historical']:
+            error_message = json_d.get('Error Message', 'Risposta dati giornalieri non valida da FMP.')
+            return ("ERRORE", error_message)
+
+        data_h = pd.DataFrame(json_h)
+        data_d = pd.DataFrame(json_d['historical'])
+        
+        if data_h.empty or data_d.empty:
+            return ("ERRORE", "FMP ha restituito dati vuoti.")
+
         for df in [data_h, data_d]:
             df['date'] = pd.to_datetime(df['date'])
             df.set_index('date', inplace=True)
-            df.sort_index(inplace=True) # Ordiniamo dal più vecchio al più recente
-            # FMP usa nomi di colonna in minuscolo, perfetto!
+            df.sort_index(inplace=True)
 
         data = {'D1': data_d, 'H4': data_h.resample('4h').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last', 'volume':'sum'}).dropna()}
         
         for df in data.values():
-            # Rinominiamo le colonne per coerenza con la nostra logica ATR
-            df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+            # Calcoliamo prima con i nomi minuscoli di FMP
             df['EMA_50']=calculate_ema(df,50); df['EMA_200']=calculate_ema(df,200)
-            df['RSI_14']=calculate_rsi(df,14); df['ATR_14']=calculate_atr(df,14)
+            df['RSI_14']=calculate_rsi(df,14);
             df['MACD_line'], df['MACD_signal']=calculate_macd(df)
             df['BBU'], df['BBL']=calculate_bollinger_bands(df)
-        return ("SUCCESSO", data)
-    except Exception as e:
-        return ("ERRORE", f"Errore FMP: {e}")
+            # Ora rinominiamo le colonne per coerenza con il resto del codice
+            df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+            # Calcoliamo l'ATR per ultimo perché richiede i nomi di colonna maiuscoli
+            df['ATR_14']=calculate_atr(df,14)
 
-# --- Le altre funzioni (get_news_sentiment, analyze_from_data) rimangono identiche ---
-from newsapi import NewsApiClient
-def get_news_sentiment(): #... (codice invariato)
+        return ("SUCCESSO", data)
+    except requests.exceptions.HTTPError as http_err:
+         return ("ERRORE", f"Errore HTTP da FMP: {http_err.response.status_code} - {http_err.response.text}")
+    except Exception as e:
+        return ("ERRORE", f"Errore imprevisto durante l'analisi FMP: {e}")
+
+# --- Le altre funzioni rimangono identiche ---
+def get_news_sentiment():
     if not NEWS_API_KEY: return "NEUTRAL (API Key non configurata)"
     try:
         newsapi = NewsApiClient(api_key=NEWS_API_KEY)
@@ -74,7 +96,7 @@ def get_news_sentiment(): #... (codice invariato)
     except Exception as e:
         print(f"Errore News API: {e}"); return "NEUTRAL (Errore API)"
 
-def analyze_from_data(data): #... (codice invariato)
+def analyze_from_data(data):
     if data is None or data['D1'].empty: return "ERRORE", "Dati non disponibili.", "N/A", None, None, None
     d1, h4 = data['D1'].iloc[-2], data['H4'].iloc[-2]; current_price_info = data['D1'].iloc[-1]
     score, mot_tecniche = 0, []
@@ -92,8 +114,16 @@ def analyze_from_data(data): #... (codice invariato)
     elif score <= -2: decisione = "APRI SHORT"
     return decisione, " ".join(mot_tecniche), motivazione_fondamentale, current_price_info['Close'], current_price_info['ATR_14'], data
 
-def analyze_market(): #... (codice invariato)
+def analyze_market():
     status, data_or_error = get_market_data()
     if status == "ERRORE":
         return "ERRORE", data_or_error, "N/A", None, None, None
-    return analyze_from_data(data_or_error)
+    return analyze_from_data(data_or_error)```
+
+### **Azione Finale**
+
+1.  **Sostituisci** il codice in `analysis.py` su GitHub.
+2.  **Fai il commit.**
+3.  **Fai il redeploy** su Koyeb.
+
+Ora il bot sarà molto più specifico nel dirti perché FMP sta fallendo, se sta fallendo. Questo ci darà l'indizio finale.
