@@ -8,7 +8,7 @@ import risk_management
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CAPITALE_INIZIALE_DEMO, RISK_PER_TRADE_PERCENT, RR_RATIO = 10000.0, 1.5, 2.0
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-bot_state = {"is_running": False, "mode": "DEMO", "balance": CAPITALE_INIZIALE_DEMO, "open_positions": []}
+bot_state = {"is_running": False, "mode": "DEMO", "balance": CAPITALE_INIZIALE_DEMO, "open_positions": [], "closed_trades": []}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bot_state["is_running"] = True; chat_id = update.effective_chat.id
@@ -33,10 +33,37 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                   f"*- Posizione Aperta:* {pos_text}")
     await update.message.reply_text(status_msg, parse_mode='Markdown')
 
+async def demo_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_state["mode"] = "DEMO"
+    await update.message.reply_text('🎮 Modalità **DEMO** attivata.', parse_mode='Markdown')
+
+async def real_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    bot_state["mode"] = "REALE"
+    await update.message.reply_text('⚠️ Modalità **REALE** attivata. AGITE CON CAUTELA.', parse_mode='Markdown')
+
+async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(f"💰 Bilancio attuale: **${bot_state['balance']:,.2f}**", parse_mode='Markdown')
+
+# --- NUOVO COMANDO ---
+async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not bot_state["open_positions"]:
+        await update.message.reply_text("Nessuna posizione attualmente aperta.")
+        return
+    
+    p = bot_state["open_positions"][0]
+    pos_details = (f"🔍 *DETTAGLIO POSIZIONE APERTA*\n"
+                   f"-------------------\n"
+                   f"*- Direzione:* {p['direction']}\n"
+                   f"*- Prezzo di Entrata:* ${p['entry_price']:.2f}\n"
+                   f"*- Stop Loss:* ${p['stop_loss']:.2f}\n"
+                   f"*- Take Profit:* ${p['take_profit']:.2f}\n"
+                   f"*(P/L attuale non ancora implementato)*")
+    await update.message.reply_text(pos_details, parse_mode='Markdown')
+
 async def market_analysis_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not bot_state["is_running"]: return
     chat_id = context.job.chat_id
-    decisione, mot_tech, _, price, atr, _ = analysis.analyze_market()
+    decisione, mot_tech, mot_fond, price, atr, _ = analysis.analyze_market()
     if decisione == "ERRORE":
         await context.bot.send_message(chat_id, f"⚠️ Errore Analisi: {mot_tech}"); return
     if bot_state["open_positions"]:
@@ -47,16 +74,20 @@ async def market_analysis_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         position = {"direction": direction, "entry_price": price, "stop_loss": sl, "take_profit": tp}
         bot_state["open_positions"].append(position)
         signal_msg = (f"{'🟢' if direction == 'LONG' else '🔴'} *NUOVO SEGNALE: {direction}*\n"
-                      f"-------------------\n*- Entry:* ${price:,.2f}\n*- SL:* ${sl:,.2f}\n"
-                      f"*- TP:* ${tp:,.2f}\n*- Motivo:* {mot_tech}")
+                      f"-------------------\n"
+                      f"*- Entry:* ${price:,.2f}\n*- SL:* ${sl:,.2f}\n*- TP:* ${tp:,.2f}\n\n"
+                      f"*Tecnica:* {mot_tech}\n"
+                      f"*Fondamentale:* {mot_fond}")
         await context.bot.send_message(chat_id, text=signal_msg, parse_mode='Markdown')
     else:
-        await context.bot.send_message(chat_id, f"✅ Analisi OK. Decisione: MANTIENI.")
+        await context.bot.send_message(chat_id, f"✅ Analisi OK. Decisione: MANTIENI. ({mot_tech})")
 
 def main() -> None:
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    for command in ["start", "stop", "status"]:
-        application.add_handler(CommandHandler(command, globals()[command]))
+    # Aggiunti i nuovi comandi alla lista
+    commands = {"start": start, "stop": stop, "status": status, "demo": demo_mode, "real": real_mode, "balance": balance, "positions": positions}
+    for name, func in commands.items():
+        application.add_handler(CommandHandler(name, func))
     application.run_polling()
 
 if __name__ == '__main__':
