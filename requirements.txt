@@ -1,9 +1,7 @@
-# requirements.txt (Fase 2.5 - Upgrade Dati)
+# requirements.txt (Versione FMP)
 setuptools
 python-telegram-bot[job-queue]>=20.0
 pandas
 numpy
-# yfinance # Non ci serve più, ma lo lasciamo commentato per ricordo
 requests
 newsapi-python
-alpha-vantage==2.3.1 
