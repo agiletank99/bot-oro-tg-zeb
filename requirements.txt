@@ -1,7 +1,9 @@
+# requirements.txt (Fase 2.5 - Upgrade Dati)
 setuptools
 python-telegram-bot[job-queue]>=20.0
 pandas
 numpy
-yfinance
+# yfinance # Non ci serve più, ma lo lasciamo commentato per ricordo
 requests
-newsapi-python 
+newsapi-python
+alpha-vantage==2.3.1 
